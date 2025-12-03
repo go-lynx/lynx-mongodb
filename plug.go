@@ -1,8 +1,8 @@
 package mongodb
 
 import (
-	"github.com/go-lynx/lynx/app"
-	"github.com/go-lynx/lynx/app/factory"
+	"github.com/go-lynx/lynx"
+	"github.com/go-lynx/lynx/pkg/factory"
 	"github.com/go-lynx/lynx/plugins"
 	"go.mongodb.org/mongo-driver/mongo"
 )
@@ -28,7 +28,7 @@ func init() {
 // It gets the plugin manager through the global Lynx application instance, then gets the corresponding plugin instance by plugin name,
 // finally converts the plugin instance to *PlugMongoDB type and returns its client field, which is the MongoDB client.
 func GetMongoDB() *mongo.Client {
-	plugin := app.Lynx().GetPluginManager().GetPlugin(pluginName)
+	plugin := lynx.Lynx().GetPluginManager().GetPlugin(pluginName)
 	if plugin == nil {
 		return nil
 	}
@@ -37,7 +37,7 @@ func GetMongoDB() *mongo.Client {
 
 // GetMongoDBPlugin gets the MongoDB plugin instance
 func GetMongoDBPlugin() *PlugMongoDB {
-	plugin := app.Lynx().GetPluginManager().GetPlugin(pluginName)
+	plugin := lynx.Lynx().GetPluginManager().GetPlugin(pluginName)
 	if plugin == nil {
 		return nil
 	}
@@ -46,7 +46,7 @@ func GetMongoDBPlugin() *PlugMongoDB {
 
 // GetMongoDBDatabase gets the MongoDB database instance
 func GetMongoDBDatabase() *mongo.Database {
-	plugin := app.Lynx().GetPluginManager().GetPlugin(pluginName)
+	plugin := lynx.Lynx().GetPluginManager().GetPlugin(pluginName)
 	if plugin == nil {
 		return nil
 	}
@@ -55,7 +55,7 @@ func GetMongoDBDatabase() *mongo.Database {
 
 // GetMongoDBCollection gets the MongoDB collection instance
 func GetMongoDBCollection(collectionName string) *mongo.Collection {
-	plugin := app.Lynx().GetPluginManager().GetPlugin(pluginName)
+	plugin := lynx.Lynx().GetPluginManager().GetPlugin(pluginName)
 	if plugin == nil {
 		return nil
 	}

@@ -3,8 +3,8 @@ package mongodb
 import (
 	"sync"
 
+	"github.com/go-lynx/lynx-mongodb/conf"
 	"github.com/go-lynx/lynx/plugins"
-	"github.com/go-lynx/lynx/plugins/nosql/mongodb/conf"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 

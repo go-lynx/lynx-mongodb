@@ -6,9 +6,9 @@ import (
 	"time"
 
 	"github.com/go-kratos/kratos/v2/config"
-	"github.com/go-lynx/lynx/app/log"
+	"github.com/go-lynx/lynx-mongodb/conf"
+	"github.com/go-lynx/lynx/log"
 	"github.com/go-lynx/lynx/plugins"
-	"github.com/go-lynx/lynx/plugins/nosql/mongodb/conf"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readconcern"

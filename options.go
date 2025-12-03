@@ -3,7 +3,7 @@ package mongodb
 import (
 	"time"
 
-	"github.com/go-lynx/lynx/plugins/nosql/mongodb/conf"
+	"github.com/go-lynx/lynx-mongodb/conf"
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
