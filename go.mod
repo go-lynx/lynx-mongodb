@@ -6,7 +6,7 @@ toolchain go1.25.3
 
 require (
 	github.com/go-kratos/kratos/v2 v2.9.1
-	github.com/go-lynx/lynx v1.5.0
+	github.com/go-lynx/lynx v1.5.2
 	go.mongodb.org/mongo-driver v1.15.0
 	google.golang.org/protobuf v1.36.10
 )
