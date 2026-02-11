@@ -18,6 +18,10 @@ type PlugMongoDB struct {
 	client *mongo.Client
 	// MongoDB database instance
 	database *mongo.Database
+	// Prometheus metrics (nil if EnableMetrics is false)
+	prometheusMetrics *PrometheusMetrics
+	// Pool monitor: number of checked-out connections (for Prometheus)
+	poolActiveConns int64
 	// Metrics collection
 	statsQuit     chan struct{}
 	statsWG       sync.WaitGroup

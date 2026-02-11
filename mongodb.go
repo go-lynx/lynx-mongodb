@@ -9,6 +9,8 @@ import (
 	"github.com/go-lynx/lynx-mongodb/conf"
 	"github.com/go-lynx/lynx/log"
 	"github.com/go-lynx/lynx/plugins"
+	"github.com/prometheus/client_golang/prometheus"
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readconcern"
@@ -33,6 +35,14 @@ func (p *PlugMongoDB) Initialize(plugin plugins.Plugin, rt plugins.Runtime) erro
 	// Parse configuration
 	if err := p.parseConfig(cfg); err != nil {
 		return fmt.Errorf("failed to parse mongodb config: %w", err)
+	}
+
+	// Initialize Prometheus metrics if enabled
+	if p.conf.EnableMetrics {
+		p.prometheusMetrics = NewPrometheusMetrics(&PrometheusConfig{
+			Namespace: "lynx",
+			Subsystem: "mongodb",
+		})
 	}
 
 	// Create MongoDB client
@@ -214,6 +224,16 @@ func (p *PlugMongoDB) createClient() error {
 	// Build client options
 	clientOptions := options.Client().ApplyURI(p.conf.Uri)
 
+	// Set CommandMonitor and PoolMonitor for Prometheus metrics
+	if p.prometheusMetrics != nil {
+		if cmdMon := p.prometheusMetrics.CreateCommandMonitor(p.conf); cmdMon != nil {
+			clientOptions.SetMonitor(cmdMon)
+		}
+		if poolMon := p.prometheusMetrics.CreatePoolMonitor(p.conf, &p.poolActiveConns); poolMon != nil {
+			clientOptions.SetPoolMonitor(poolMon)
+		}
+	}
+
 	// Set connection pool configuration
 	clientOptions.SetMaxPoolSize(p.conf.MaxPoolSize)
 	clientOptions.SetMinPoolSize(p.conf.MinPoolSize)
@@ -343,6 +363,8 @@ func (p *PlugMongoDB) startMetricsCollection() {
 	p.statsWG.Add(1)
 	go func() {
 		defer p.statsWG.Done()
+		// Collect immediately so Grafana database template has data from the start
+		p.collectMetrics()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
@@ -367,23 +389,24 @@ func (p *PlugMongoDB) stopMetricsCollection() {
 	}
 }
 
-// collectMetrics collects metrics
+// collectMetrics collects metrics from MongoDB and updates Prometheus
 func (p *PlugMongoDB) collectMetrics() {
-	// Here you can collect MongoDB metrics
-	// For example: connection pool status, operation statistics, performance metrics, etc.
 	ctx, cancel := p.createTimeoutContext(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Get database statistics
-	stats := p.database.RunCommand(ctx, map[string]interface{}{
-		"dbStats": 1,
-	})
-	if stats.Err() != nil {
-		log.Errorf("failed to get database stats: %v", stats.Err())
-		return
+	// Update config-based metrics (connection pool max, etc.)
+	if p.prometheusMetrics != nil {
+		p.prometheusMetrics.UpdateConfigMetrics(p.conf)
 	}
 
-	// You can send metrics to the monitoring system here
+	// Get database statistics (validates connection, supports future extended metrics)
+	var dbStatsResult bson.M
+	if err := p.database.RunCommand(ctx, bson.D{{Key: "dbStats", Value: 1}}).Decode(&dbStatsResult); err != nil {
+		log.Errorf("failed to get database stats: %v", err)
+		return
+	}
+	_ = dbStatsResult // reserved for future storage-size etc. metrics
+
 	log.Debug("mongodb metrics collected")
 }
 
@@ -454,11 +477,13 @@ func (p *PlugMongoDB) checkHealth() error {
 	ctx, cancel := p.createTimeoutContext(context.Background(), 5*time.Second)
 	defer cancel()
 
-	// Send ping request
-	if err := p.client.Ping(ctx, nil); err != nil {
+	err := p.client.Ping(ctx, nil)
+	if p.prometheusMetrics != nil {
+		p.prometheusMetrics.RecordHealthCheck(err == nil, p.conf)
+	}
+	if err != nil {
 		return err
 	}
-
 	return nil
 }
 
@@ -478,6 +503,15 @@ func (p *PlugMongoDB) GetCollection(collectionName string) *mongo.Collection {
 		return nil
 	}
 	return p.database.Collection(collectionName)
+}
+
+// MetricsGatherer returns the Prometheus Gatherer for this plugin (implements metricsGathererProvider interface).
+// Used by Lynx lifecycle to auto-register plugin metrics into the global /metrics endpoint.
+func (p *PlugMongoDB) MetricsGatherer() prometheus.Gatherer {
+	if p.prometheusMetrics == nil {
+		return nil
+	}
+	return p.prometheusMetrics.GetGatherer()
 }
 
 // GetConnectionStats gets connection statistics

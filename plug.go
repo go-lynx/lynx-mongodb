@@ -4,6 +4,7 @@ import (
 	"github.com/go-lynx/lynx"
 	"github.com/go-lynx/lynx/pkg/factory"
 	"github.com/go-lynx/lynx/plugins"
+	"github.com/prometheus/client_golang/prometheus"
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
@@ -60,4 +61,14 @@ func GetMongoDBCollection(collectionName string) *mongo.Collection {
 		return nil
 	}
 	return plugin.(*PlugMongoDB).GetCollection(collectionName)
+}
+
+// GetMetricsGatherer returns the Prometheus Gatherer for the mongodb plugin, or nil if not loaded or metrics disabled.
+// Use this to merge plugin metrics into your application's /metrics endpoint.
+func GetMetricsGatherer() prometheus.Gatherer {
+	plugin := lynx.Lynx().GetPluginManager().GetPlugin(pluginName)
+	if plugin == nil {
+		return nil
+	}
+	return plugin.(*PlugMongoDB).MetricsGatherer()
 }

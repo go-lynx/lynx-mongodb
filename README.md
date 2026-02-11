@@ -58,7 +58,7 @@ import (
     "time"
     
     "github.com/go-lynx/lynx/app/boot"
-    "github.com/go-lynx/lynx/plugins/nosql/mongodb"
+    "github.com/go-lynx/lynx-mongodb"
     "go.mongodb.org/mongo-driver/bson"
     "go.mongodb.org/mongo-driver/mongo"
     "go.mongodb.org/mongo-driver/mongo/options"
@@ -240,6 +240,11 @@ plugin := mongodb.GetMongoDBPlugin()
 
 // Get connection statistics
 stats := plugin.GetConnectionStats()
+
+// Get Prometheus metrics gatherer (merge into /metrics endpoint)
+if g := mongodb.GetMetricsGatherer(); g != nil {
+    // metrics.RegisterGatherer(g) or merge with your Prometheus handler
+}
 ```
 
 ### Plugin Options
@@ -264,13 +269,20 @@ plugin := mongodb.NewMongoDBClient(
 
 ## Monitoring and Metrics
 
-The plugin provides the following monitoring capabilities:
+When `enable_metrics: true`, the plugin exposes Prometheus metrics:
 
-- **Connection pool status monitoring**
-- **Database operation statistics**
-- **Query performance metrics**
-- **Error rate statistics**
-- **Connection health status**
+| Metric | Type | Description |
+|--------|------|-------------|
+| `lynx_mongodb_connection_pool_active` | Gauge | Active (checked-out) connections |
+| `lynx_mongodb_connection_pool_max` | Gauge | Max pool size from config |
+| `lynx_mongodb_active_connections` | Gauge | Same as connection_pool_active |
+| `lynx_mongodb_operations_total` | Counter | Operations by type (find/insert/update/delete) |
+| `lynx_mongodb_query_duration_seconds` | Histogram | Command latency |
+| `lynx_mongodb_errors_total` | Counter | Failed operations |
+| `lynx_mongodb_documents_processed_total` | Counter | Documents returned/modified |
+| `lynx_mongodb_health_check_*` | Counter | Health check success/failure |
+
+Use `GetMetricsGatherer()` or implement `MetricsGatherer()` on the plugin for Lynx lifecycle auto-registration.
 
 ## Health Checks
 
@@ -318,16 +330,6 @@ The plugin provides comprehensive error handling mechanisms:
    - Adjust connection pool size
    - Optimize query statements
    - Check index configuration
-
-### Log Debugging
-
-Enable debug logging:
-
-```yaml
-lynx:
-  mongodb:
-    log_level: "debug"
-```
 
 ## License
 

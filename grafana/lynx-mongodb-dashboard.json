@@ -86,7 +86,7 @@
           "type": "prometheus",
           "uid": "$DS_PROM"
         },
-        "query": "label_values(lynx_mongodb_operations_total, database)",
+        "query": "label_values(lynx_mongodb_connection_pool_max, database)",
         "refresh": 2,
         "multi": true,
         "includeAll": true,
