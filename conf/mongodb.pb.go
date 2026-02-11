@@ -328,7 +328,7 @@ const file_mongodb_proto_rawDesc = "" +
 	"\x12read_concern_level\x18\x17 \x01(\tR\x10readConcernLevel\x120\n" +
 	"\x14enable_write_concern\x18\x18 \x01(\bR\x12enableWriteConcern\x12&\n" +
 	"\x0fwrite_concern_w\x18\x19 \x01(\x05R\rwriteConcernW\x12M\n" +
-	"\x15write_concern_timeout\x18\x1a \x01(\v2\x19.google.protobuf.DurationR\x13writeConcernTimeoutB9Z7github.com/go-lynx/lynx/plugins/nosql/mongodb/conf;confb\x06proto3"
+	"\x15write_concern_timeout\x18\x1a \x01(\v2\x19.google.protobuf.DurationR\x13writeConcernTimeoutB+Z)github.com/go-lynx/lynx-mongodb/conf;confb\x06proto3"
 
 var (
 	file_mongodb_proto_rawDescOnce sync.Once
