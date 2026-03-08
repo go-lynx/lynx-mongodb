@@ -9,7 +9,7 @@ const (
 	// Plugin unique name
 	pluginName = "mongodb.client"
 	// Plugin version number
-	pluginVersion = "v1.5.4"
+	pluginVersion = "v1.5.5"
 	// Plugin description
 	pluginDescription = "mongodb plugin for lynx framework"
 	// Configuration prefix, used to read plugin-related configuration from config
