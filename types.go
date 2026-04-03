@@ -1,6 +1,7 @@
 package mongodb
 
 import (
+	"context"
 	"sync"
 
 	"github.com/go-lynx/lynx-mongodb/conf"
@@ -29,4 +30,6 @@ type PlugMongoDB struct {
 	statsMu       sync.Mutex
 	metricsCancel func()
 	healthCancel  func()
+	lifecycleCtx  context.Context
+	lifecycleStop context.CancelFunc
 }

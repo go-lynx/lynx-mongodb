@@ -20,101 +20,17 @@ import (
 
 // Initialize initializes the MongoDB plugin
 func (p *PlugMongoDB) Initialize(plugin plugins.Plugin, rt plugins.Runtime) error {
-	err := p.BasePlugin.Initialize(plugin, rt)
-	if err != nil {
-		log.Error(err)
-		return err
-	}
-
-	// Get configuration from runtime
-	cfg := rt.GetConfig()
-	if cfg == nil {
-		return fmt.Errorf("failed to get config from runtime")
-	}
-
-	// Parse configuration
-	if err := p.parseConfig(cfg); err != nil {
-		return fmt.Errorf("failed to parse mongodb config: %w", err)
-	}
-
-	// Initialize Prometheus metrics if enabled
-	if p.conf.EnableMetrics {
-		p.prometheusMetrics = NewPrometheusMetrics(&PrometheusConfig{
-			Namespace: "lynx",
-			Subsystem: "mongodb",
-		})
-	}
-
-	// Create MongoDB client
-	if err := p.createClient(); err != nil {
-		return fmt.Errorf("failed to create mongodb client: %w", err)
-	}
-
-	// Start metrics collection
-	if p.conf.EnableMetrics {
-		p.startMetricsCollection()
-	}
-
-	// Start health check
-	if p.conf.EnableHealthCheck {
-		p.startHealthCheck()
-	}
-
-	log.Info("mongodb plugin initialized successfully")
-	return nil
+	return p.initializeWithContext(context.Background(), plugin, rt)
 }
 
 // Start starts the MongoDB plugin
 func (p *PlugMongoDB) Start(plugin plugins.Plugin) error {
-	err := p.BasePlugin.Start(plugin)
-	if err != nil {
-		log.Error(err)
-		return err
-	}
-
-	// Test connection
-	if err := p.testConnection(); err != nil {
-		return fmt.Errorf("failed to test mongodb connection: %w", err)
-	}
-
-	// Ensure shared quit channel is initialized when any background task is enabled
-	if p.statsQuit == nil && (p.conf.EnableMetrics || p.conf.EnableHealthCheck) {
-		p.statsQuit = make(chan struct{})
-	}
-
-	log.Info("mongodb plugin started successfully")
-	return nil
+	return p.startWithContext(context.Background(), plugin, "Start")
 }
 
 // Stop stops the MongoDB plugin
 func (p *PlugMongoDB) Stop(plugin plugins.Plugin) error {
-	err := p.BasePlugin.Stop(plugin)
-	if err != nil {
-		log.Error(err)
-		return err
-	}
-
-	// Stop metrics collection
-	if p.conf.EnableMetrics {
-		p.stopMetricsCollection()
-	}
-
-	// Stop health check
-	if p.conf.EnableHealthCheck {
-		p.stopHealthCheck()
-	}
-
-	// Close client connection with timeout to avoid blocking shutdown
-	if p.client != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := p.client.Disconnect(ctx); err != nil {
-			log.Errorf("failed to disconnect mongodb client: %v", err)
-		}
-	}
-
-	log.Info("mongodb plugin stopped successfully")
-	return nil
+	return p.stopWithContext(context.Background(), plugin, "Stop")
 }
 
 // CleanupTasks implements the plugin cleanup interface
@@ -126,19 +42,10 @@ func (p *PlugMongoDB) CleanupTasks() error {
 func (p *PlugMongoDB) CleanupTasksContext(parentCtx context.Context) error {
 	log.Info("cleaning up mongodb plugin")
 
-	// Stop metrics collection
-	if p.metricsCancel != nil {
-		p.metricsCancel()
-		p.metricsCancel = nil
+	if err := p.stopBackgroundTasksContext(parentCtx); err != nil {
+		return err
 	}
 
-	// Stop health check
-	if p.healthCancel != nil {
-		p.healthCancel()
-		p.healthCancel = nil
-	}
-
-	// Close client connection with context-aware timeout
 	if p.client != nil {
 		ctx, cancel := p.createTimeoutContext(parentCtx, 5*time.Second)
 		defer cancel()
@@ -146,7 +53,11 @@ func (p *PlugMongoDB) CleanupTasksContext(parentCtx context.Context) error {
 			log.Errorf("failed to disconnect mongodb client: %v", err)
 			return err
 		}
+		p.client = nil
+		p.database = nil
 	}
+
+	p.resetLifecycleContext()
 
 	log.Info("mongodb plugin cleaned up successfully")
 	return nil
@@ -215,6 +126,10 @@ func (p *PlugMongoDB) parseConfig(cfg config.Config) error {
 
 // createClient creates the MongoDB client
 func (p *PlugMongoDB) createClient() error {
+	return p.createClientContext(context.Background())
+}
+
+func (p *PlugMongoDB) createClientContext(parentCtx context.Context) error {
 	// Parse timeout values
 	connectTimeout := p.conf.ConnectTimeout.AsDuration()
 	serverSelectionTimeout := p.conf.ServerSelectionTimeout.AsDuration()
@@ -314,7 +229,7 @@ func (p *PlugMongoDB) createClient() error {
 	}
 
 	// Create client with timeout to avoid startup hang
-	ctx, cancel := context.WithTimeout(context.Background(), connectTimeout)
+	ctx, cancel := p.createTimeoutContext(parentCtx, connectTimeout)
 	defer cancel()
 	client, err := mongo.Connect(ctx, clientOptions)
 	if err != nil {
@@ -331,7 +246,11 @@ func (p *PlugMongoDB) createClient() error {
 
 // testConnection tests the connection
 func (p *PlugMongoDB) testConnection() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	return p.testConnectionContext(context.Background())
+}
+
+func (p *PlugMongoDB) testConnectionContext(parentCtx context.Context) error {
+	ctx, cancel := p.createTimeoutContext(parentCtx, 10*time.Second)
 	defer cancel()
 
 	// Send ping request
@@ -353,25 +272,26 @@ func (p *PlugMongoDB) startMetricsCollection() {
 	}
 
 	// Ensure quit channel exists
-	if p.statsQuit == nil {
-		p.statsQuit = make(chan struct{})
+	p.ensureStatsQuit()
+	baseCtx := p.lifecycleCtx
+	if baseCtx == nil {
+		baseCtx = context.Background()
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(baseCtx)
 	p.metricsCancel = cancel
 
 	p.statsWG.Add(1)
 	go func() {
 		defer p.statsWG.Done()
 		// Collect immediately so Grafana database template has data from the start
-		p.collectMetrics()
+		p.collectMetricsContext(ctx)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
 		for {
 			select {
 			case <-ticker.C:
-				p.collectMetrics()
+				p.collectMetricsContext(ctx)
 			case <-ctx.Done():
 				return
 			case <-p.statsQuit:
@@ -383,15 +303,16 @@ func (p *PlugMongoDB) startMetricsCollection() {
 
 // stopMetricsCollection stops metrics collection
 func (p *PlugMongoDB) stopMetricsCollection() {
-	if p.statsQuit != nil {
-		p.closeStatsQuitOnce()
-		p.statsWG.Wait()
-	}
+	_ = p.stopBackgroundTasksContext(context.Background())
 }
 
 // collectMetrics collects metrics from MongoDB and updates Prometheus
 func (p *PlugMongoDB) collectMetrics() {
-	ctx, cancel := p.createTimeoutContext(context.Background(), 5*time.Second)
+	p.collectMetricsContext(context.Background())
+}
+
+func (p *PlugMongoDB) collectMetricsContext(parentCtx context.Context) {
+	ctx, cancel := p.createTimeoutContext(parentCtx, 5*time.Second)
 	defer cancel()
 
 	// Update config-based metrics (connection pool max, etc.)
@@ -401,6 +322,9 @@ func (p *PlugMongoDB) collectMetrics() {
 
 	// Get database statistics (validates connection, supports future extended metrics)
 	var dbStatsResult bson.M
+	if p.database == nil {
+		return
+	}
 	if err := p.database.RunCommand(ctx, bson.D{{Key: "dbStats", Value: 1}}).Decode(&dbStatsResult); err != nil {
 		log.Errorf("failed to get database stats: %v", err)
 		return
@@ -415,11 +339,12 @@ func (p *PlugMongoDB) startHealthCheck() {
 	interval := p.conf.HealthCheckInterval.AsDuration()
 
 	// Ensure quit channel exists
-	if p.statsQuit == nil {
-		p.statsQuit = make(chan struct{})
+	p.ensureStatsQuit()
+	baseCtx := p.lifecycleCtx
+	if baseCtx == nil {
+		baseCtx = context.Background()
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(baseCtx)
 	p.healthCancel = cancel
 
 	p.statsWG.Add(1)
@@ -431,7 +356,7 @@ func (p *PlugMongoDB) startHealthCheck() {
 		for {
 			select {
 			case <-ticker.C:
-				if err := p.checkHealth(); err != nil {
+				if err := p.checkHealthContext(ctx); err != nil {
 					log.Errorf("mongodb health check failed: %v", err)
 				}
 			case <-ctx.Done():
@@ -445,21 +370,7 @@ func (p *PlugMongoDB) startHealthCheck() {
 
 // stopHealthCheck stops health check
 func (p *PlugMongoDB) stopHealthCheck() {
-	if p.statsQuit != nil {
-		p.closeStatsQuitOnce()
-		// Wait for all goroutines (metrics + health) to exit, set timeout to avoid infinite wait
-		done := make(chan struct{})
-		go func() {
-			p.statsWG.Wait()
-			close(done)
-		}()
-		select {
-		case <-done:
-			log.Infof("mongodb background tasks stopped successfully")
-		case <-time.After(10 * time.Second):
-			log.Warnf("timeout waiting for mongodb background tasks to stop")
-		}
-	}
+	_ = p.stopBackgroundTasksContext(context.Background())
 }
 
 // closeStatsQuitOnce closes statsQuit only once in a thread-safe way
@@ -474,9 +385,16 @@ func (p *PlugMongoDB) closeStatsQuitOnce() {
 
 // checkHealth executes health check
 func (p *PlugMongoDB) checkHealth() error {
-	ctx, cancel := p.createTimeoutContext(context.Background(), 5*time.Second)
+	return p.checkHealthContext(context.Background())
+}
+
+func (p *PlugMongoDB) checkHealthContext(parentCtx context.Context) error {
+	ctx, cancel := p.createTimeoutContext(parentCtx, 5*time.Second)
 	defer cancel()
 
+	if p.client == nil {
+		return fmt.Errorf("mongodb client is nil")
+	}
 	err := p.client.Ping(ctx, nil)
 	if p.prometheusMetrics != nil {
 		p.prometheusMetrics.RecordHealthCheck(err == nil, p.conf)
@@ -485,6 +403,45 @@ func (p *PlugMongoDB) checkHealth() error {
 		return err
 	}
 	return nil
+}
+
+func (p *PlugMongoDB) CheckHealth() error {
+	return p.checkHealthContext(context.Background())
+}
+
+func (p *PlugMongoDB) stopBackgroundTasksContext(parentCtx context.Context) error {
+	if p.metricsCancel != nil {
+		p.metricsCancel()
+		p.metricsCancel = nil
+	}
+	if p.healthCancel != nil {
+		p.healthCancel()
+		p.healthCancel = nil
+	}
+	if p.statsQuit != nil {
+		p.closeStatsQuitOnce()
+	}
+
+	done := make(chan struct{})
+	go func() {
+		p.statsWG.Wait()
+		close(done)
+	}()
+
+	waitCtx, cancel := p.createTimeoutContext(parentCtx, 10*time.Second)
+	defer cancel()
+
+	select {
+	case <-done:
+		log.Infof("mongodb background tasks stopped successfully")
+		p.statsMu.Lock()
+		p.statsQuit = nil
+		p.statsClosed = false
+		p.statsMu.Unlock()
+		return nil
+	case <-waitCtx.Done():
+		return waitCtx.Err()
+	}
 }
 
 // GetClient gets the MongoDB client
