@@ -19,6 +19,8 @@ type PlugMongoDB struct {
 	client *mongo.Client
 	// MongoDB database instance
 	database *mongo.Database
+	// Runtime with plugin context for publishing private/shared resources
+	rt plugins.Runtime
 	// Prometheus metrics (nil if EnableMetrics is false)
 	prometheusMetrics *PrometheusMetrics
 	// Pool monitor: number of checked-out connections (for Prometheus)

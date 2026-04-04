@@ -56,6 +56,7 @@ func (p *PlugMongoDB) CleanupTasksContext(parentCtx context.Context) error {
 		p.client = nil
 		p.database = nil
 	}
+	p.rt = nil
 
 	p.resetLifecycleContext()
 

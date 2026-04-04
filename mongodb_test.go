@@ -1,6 +1,7 @@
 package mongodb
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -19,6 +20,22 @@ func TestNewMongoDBClient(t *testing.T) {
 	}
 	if client.conf != nil {
 		t.Error("expected conf to be nil before Initialize")
+	}
+}
+
+func TestProvider_ReturnsErrorWhenLynxUnavailable(t *testing.T) {
+	provider := GetProvider()
+	if provider == nil {
+		t.Fatal("expected mongodb provider")
+	}
+	if _, err := provider.Client(context.Background()); err == nil {
+		t.Fatal("expected error when lynx is not initialized")
+	}
+	if GetMongoDB() != nil {
+		t.Fatal("expected nil mongodb client when lynx is not initialized")
+	}
+	if GetMongoDBDatabase() != nil {
+		t.Fatal("expected nil mongodb database when lynx is not initialized")
 	}
 }
 

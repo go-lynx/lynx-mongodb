@@ -1,6 +1,8 @@
 package mongodb
 
 import (
+	"context"
+
 	"github.com/go-lynx/lynx"
 	"github.com/go-lynx/lynx/pkg/factory"
 	"github.com/go-lynx/lynx/plugins"
@@ -29,46 +31,58 @@ func init() {
 // It gets the plugin manager through the global Lynx application instance, then gets the corresponding plugin instance by plugin name,
 // finally converts the plugin instance to *PlugMongoDB type and returns its client field, which is the MongoDB client.
 func GetMongoDB() *mongo.Client {
-	plugin := lynx.Lynx().GetPluginManager().GetPlugin(pluginName)
-	if plugin == nil {
+	client, err := GetProvider().Client(context.Background())
+	if err != nil {
 		return nil
 	}
-	return plugin.(*PlugMongoDB).GetClient()
+	return client
 }
 
 // GetMongoDBPlugin gets the MongoDB plugin instance
 func GetMongoDBPlugin() *PlugMongoDB {
-	plugin := lynx.Lynx().GetPluginManager().GetPlugin(pluginName)
+	app := lynx.Lynx()
+	if app == nil {
+		return nil
+	}
+	manager := app.GetPluginManager()
+	if manager == nil {
+		return nil
+	}
+	plugin := manager.GetPlugin(pluginName)
 	if plugin == nil {
 		return nil
 	}
-	return plugin.(*PlugMongoDB)
+	client, ok := plugin.(*PlugMongoDB)
+	if !ok {
+		return nil
+	}
+	return client
 }
 
 // GetMongoDBDatabase gets the MongoDB database instance
 func GetMongoDBDatabase() *mongo.Database {
-	plugin := lynx.Lynx().GetPluginManager().GetPlugin(pluginName)
-	if plugin == nil {
+	database, err := GetProvider().Database(context.Background())
+	if err != nil {
 		return nil
 	}
-	return plugin.(*PlugMongoDB).GetDatabase()
+	return database
 }
 
 // GetMongoDBCollection gets the MongoDB collection instance
 func GetMongoDBCollection(collectionName string) *mongo.Collection {
-	plugin := lynx.Lynx().GetPluginManager().GetPlugin(pluginName)
-	if plugin == nil {
+	collection, err := GetProvider().Collection(context.Background(), collectionName)
+	if err != nil {
 		return nil
 	}
-	return plugin.(*PlugMongoDB).GetCollection(collectionName)
+	return collection
 }
 
 // GetMetricsGatherer returns the Prometheus Gatherer for the mongodb plugin, or nil if not loaded or metrics disabled.
 // Use this to merge plugin metrics into your application's /metrics endpoint.
 func GetMetricsGatherer() prometheus.Gatherer {
-	plugin := lynx.Lynx().GetPluginManager().GetPlugin(pluginName)
+	plugin := GetMongoDBPlugin()
 	if plugin == nil {
 		return nil
 	}
-	return plugin.(*PlugMongoDB).MetricsGatherer()
+	return plugin.MetricsGatherer()
 }

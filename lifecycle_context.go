@@ -48,6 +48,7 @@ func (p *PlugMongoDB) initializeWithContext(ctx context.Context, plugin plugins.
 	if err := p.parseConfig(cfg); err != nil {
 		return fmt.Errorf("failed to parse mongodb config: %w", err)
 	}
+	p.rt = rt.WithPluginContext(pluginName)
 
 	if p.conf.EnableMetrics && p.prometheusMetrics == nil {
 		p.prometheusMetrics = NewPrometheusMetrics(&PrometheusConfig{
@@ -62,6 +63,7 @@ func (p *PlugMongoDB) initializeWithContext(ctx context.Context, plugin plugins.
 		p.resetLifecycleContext()
 		return fmt.Errorf("failed to create mongodb client: %w", err)
 	}
+	p.publishResourceContract()
 
 	if p.conf.EnableMetrics {
 		p.startMetricsCollection()
@@ -99,6 +101,7 @@ func (p *PlugMongoDB) startWithContext(ctx context.Context, plugin plugins.Plugi
 		p.SetStatus(plugins.StatusFailed)
 		return fmt.Errorf("failed to test mongodb connection: %w", err)
 	}
+	p.publishResourceContract()
 
 	if p.conf != nil && p.conf.EnableMetrics && p.metricsCancel == nil {
 		p.startMetricsCollection()
