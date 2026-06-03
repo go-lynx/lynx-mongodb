@@ -1,3 +1,7 @@
+// Package mongodb provides a MongoDB client plugin for the Lynx framework.
+// It manages a mongo.Client connection pool with configurable TLS, authentication,
+// read/write concerns, and compression. Background health checks and Prometheus metrics
+// (command latency, pool stats, connection health) are collected at a configurable interval.
 package mongodb
 
 import (

@@ -125,11 +125,6 @@ func (p *PlugMongoDB) parseConfig(cfg config.Config) error {
 	return nil
 }
 
-// createClient creates the MongoDB client
-func (p *PlugMongoDB) createClient() error {
-	return p.createClientContext(context.Background())
-}
-
 func (p *PlugMongoDB) createClientContext(parentCtx context.Context) error {
 	// Parse timeout values
 	connectTimeout := p.conf.ConnectTimeout.AsDuration()
@@ -171,7 +166,7 @@ func (p *PlugMongoDB) createClientContext(parentCtx context.Context) error {
 
 	// Set TLS configuration
 	if p.conf.EnableTls {
-		tlsOpts := make(map[string]interface{})
+		tlsOpts := make(map[string]any)
 		if p.conf.TlsCertFile != "" {
 			tlsOpts["certFile"] = p.conf.TlsCertFile
 		}
@@ -220,12 +215,10 @@ func (p *PlugMongoDB) createClientContext(parentCtx context.Context) error {
 
 	// Set write concern
 	if p.conf.EnableWriteConcern {
-		writeConcernTimeout := p.conf.WriteConcernTimeout.AsDuration()
-
-		wc := writeconcern.New(
-			writeconcern.W(int(p.conf.WriteConcernW)),
-			writeconcern.WTimeout(writeConcernTimeout),
-		)
+		wc := &writeconcern.WriteConcern{
+			W:        int(p.conf.WriteConcernW),
+			WTimeout: p.conf.WriteConcernTimeout.AsDuration(),
+		}
 		clientOptions.SetWriteConcern(wc)
 	}
 
@@ -243,11 +236,6 @@ func (p *PlugMongoDB) createClientContext(parentCtx context.Context) error {
 	p.database = client.Database(p.conf.Database)
 
 	return nil
-}
-
-// testConnection tests the connection
-func (p *PlugMongoDB) testConnection() error {
-	return p.testConnectionContext(context.Background())
 }
 
 func (p *PlugMongoDB) testConnectionContext(parentCtx context.Context) error {
@@ -281,9 +269,7 @@ func (p *PlugMongoDB) startMetricsCollection() {
 	ctx, cancel := context.WithCancel(baseCtx)
 	p.metricsCancel = cancel
 
-	p.statsWG.Add(1)
-	go func() {
-		defer p.statsWG.Done()
+	p.statsWG.Go(func() {
 		// Collect immediately so Grafana database template has data from the start
 		p.collectMetricsContext(ctx)
 		ticker := time.NewTicker(interval)
@@ -299,17 +285,7 @@ func (p *PlugMongoDB) startMetricsCollection() {
 				return
 			}
 		}
-	}()
-}
-
-// stopMetricsCollection stops metrics collection
-func (p *PlugMongoDB) stopMetricsCollection() {
-	_ = p.stopBackgroundTasksContext(context.Background())
-}
-
-// collectMetrics collects metrics from MongoDB and updates Prometheus
-func (p *PlugMongoDB) collectMetrics() {
-	p.collectMetricsContext(context.Background())
+	})
 }
 
 func (p *PlugMongoDB) collectMetricsContext(parentCtx context.Context) {
@@ -348,9 +324,7 @@ func (p *PlugMongoDB) startHealthCheck() {
 	ctx, cancel := context.WithCancel(baseCtx)
 	p.healthCancel = cancel
 
-	p.statsWG.Add(1)
-	go func() {
-		defer p.statsWG.Done()
+	p.statsWG.Go(func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
@@ -366,12 +340,7 @@ func (p *PlugMongoDB) startHealthCheck() {
 				return
 			}
 		}
-	}()
-}
-
-// stopHealthCheck stops health check
-func (p *PlugMongoDB) stopHealthCheck() {
-	_ = p.stopBackgroundTasksContext(context.Background())
+	})
 }
 
 // closeStatsQuitOnce closes statsQuit only once in a thread-safe way
@@ -382,11 +351,6 @@ func (p *PlugMongoDB) closeStatsQuitOnce() {
 		close(p.statsQuit)
 		p.statsClosed = true
 	}
-}
-
-// checkHealth executes health check
-func (p *PlugMongoDB) checkHealth() error {
-	return p.checkHealthContext(context.Background())
 }
 
 func (p *PlugMongoDB) checkHealthContext(parentCtx context.Context) error {
