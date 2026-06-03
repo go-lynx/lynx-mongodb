@@ -288,6 +288,11 @@ func (p *PlugMongoDB) startMetricsCollection() {
 	p.metricsCancel = cancel
 
 	p.statsWG.Go(func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Errorf("mongodb metrics collection panic: %v", r)
+			}
+		}()
 		// Collect immediately so Grafana database template has data from the start
 		p.collectMetricsContext(ctx)
 		ticker := time.NewTicker(interval)
@@ -349,6 +354,11 @@ func (p *PlugMongoDB) startHealthCheck() {
 	p.healthCancel = cancel
 
 	p.statsWG.Go(func() {
+		defer func() {
+			if r := recover(); r != nil {
+				log.Errorf("mongodb health check panic: %v", r)
+			}
+		}()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
