@@ -115,7 +115,7 @@ func TestExtractDocumentsFromReply(t *testing.T) {
 	// Reply with cursor firstBatch
 	reply3, _ := bson.Marshal(bson.M{
 		"cursor": bson.M{
-			"firstBatch": []interface{}{bson.M{"a": 1}, bson.M{"a": 2}},
+			"firstBatch": []any{bson.M{"a": 1}, bson.M{"a": 2}},
 			"id":         int64(0),
 		},
 		"ok": 1,
@@ -160,6 +160,125 @@ func TestPrometheusMetrics(t *testing.T) {
 	pm.UpdateConfigMetrics(cfg)
 	pm.RecordHealthCheck(true, cfg)
 	pm.RecordHealthCheck(false, cfg)
+}
+
+func TestUpdateDBStats(t *testing.T) {
+	pm := NewPrometheusMetrics(nil)
+	cfg := &conf.MongoDB{Database: "testdb"}
+
+	// Normal case: all fields present
+	stats := bson.M{
+		"dataSize":    float64(1024),
+		"storageSize": int64(2048),
+		"objects":     int32(50),
+		"indexes":     int32(5),
+	}
+	pm.UpdateDBStats(cfg, stats)
+
+	// Verify metrics were written by gathering and checking families
+	mfs, err := pm.registry.Gather()
+	if err != nil {
+		t.Fatalf("Gather error: %v", err)
+	}
+	found := map[string]bool{}
+	for _, mf := range mfs {
+		switch mf.GetName() {
+		case "lynx_mongodb_db_data_size_bytes",
+			"lynx_mongodb_db_storage_size_bytes",
+			"lynx_mongodb_db_objects_total",
+			"lynx_mongodb_db_indexes_total":
+			found[mf.GetName()] = true
+		}
+	}
+	for _, name := range []string{
+		"lynx_mongodb_db_data_size_bytes",
+		"lynx_mongodb_db_storage_size_bytes",
+		"lynx_mongodb_db_objects_total",
+		"lynx_mongodb_db_indexes_total",
+	} {
+		if !found[name] {
+			t.Errorf("expected metric family %q to be present after UpdateDBStats", name)
+		}
+	}
+
+	// nil-safety: should not panic
+	pm.UpdateDBStats(nil, stats)
+	pm.UpdateDBStats(cfg, nil)
+	(*PrometheusMetrics)(nil).UpdateDBStats(cfg, stats)
+}
+
+func TestTLSOptionSetsFields(t *testing.T) {
+	p := NewMongoDBClient()
+	WithTLS(true, "cert.pem", "key.pem", "ca.pem")(p)
+	if !p.conf.EnableTls {
+		t.Error("expected EnableTls true")
+	}
+	if p.conf.TlsCertFile != "cert.pem" {
+		t.Errorf("unexpected TlsCertFile: %q", p.conf.TlsCertFile)
+	}
+	if p.conf.TlsKeyFile != "key.pem" {
+		t.Errorf("unexpected TlsKeyFile: %q", p.conf.TlsKeyFile)
+	}
+	if p.conf.TlsCaFile != "ca.pem" {
+		t.Errorf("unexpected TlsCaFile: %q", p.conf.TlsCaFile)
+	}
+
+	// Bare TLS (no cert files)
+	p2 := NewMongoDBClient()
+	WithTLS(true, "", "", "")(p2)
+	if !p2.conf.EnableTls {
+		t.Error("expected EnableTls true for bare TLS")
+	}
+	if p2.conf.TlsCertFile != "" || p2.conf.TlsKeyFile != "" || p2.conf.TlsCaFile != "" {
+		t.Error("expected empty cert/key/ca for bare TLS")
+	}
+}
+
+func TestLifecycleContextEnsureReset(t *testing.T) {
+	p := NewMongoDBClient()
+	// Before any call, lifecycleCtx should be nil
+	if p.lifecycleCtx != nil {
+		t.Error("expected nil lifecycleCtx before ensureLifecycleContext")
+	}
+	p.ensureLifecycleContext()
+	if p.lifecycleCtx == nil {
+		t.Error("expected non-nil lifecycleCtx after ensureLifecycleContext")
+	}
+	// Second call should be a no-op (same context)
+	first := p.lifecycleCtx
+	p.ensureLifecycleContext()
+	if p.lifecycleCtx != first {
+		t.Error("expected same lifecycleCtx on second ensureLifecycleContext call")
+	}
+	// After reset, context should be nil
+	p.resetLifecycleContext()
+	if p.lifecycleCtx != nil {
+		t.Error("expected nil lifecycleCtx after resetLifecycleContext")
+	}
+	if p.lifecycleStop != nil {
+		t.Error("expected nil lifecycleStop after resetLifecycleContext")
+	}
+}
+
+func TestEnsureStatsQuit(t *testing.T) {
+	p := NewMongoDBClient()
+	if p.statsQuit != nil {
+		t.Error("expected nil statsQuit before ensureStatsQuit")
+	}
+	p.ensureStatsQuit()
+	if p.statsQuit == nil {
+		t.Error("expected non-nil statsQuit after ensureStatsQuit")
+	}
+	if p.statsClosed {
+		t.Error("expected statsClosed=false after ensureStatsQuit")
+	}
+	// closeStatsQuitOnce should close once without panic
+	p.closeStatsQuitOnce()
+	if !p.statsClosed {
+		t.Error("expected statsClosed=true after closeStatsQuitOnce")
+	}
+	// Second call should be a no-op
+	p.closeStatsQuitOnce()
 }
 
 func TestParseConfigDefaults(t *testing.T) {

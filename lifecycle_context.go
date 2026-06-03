@@ -155,6 +155,8 @@ func (p *PlugMongoDB) stopWithContext(ctx context.Context, plugin plugins.Plugin
 	return nil
 }
 
+// ensureLifecycleContext creates a new lifecycleCtx/lifecycleStop pair if one does not
+// exist or has already been cancelled. Safe for concurrent calls via statsMu.
 func (p *PlugMongoDB) ensureLifecycleContext() {
 	p.statsMu.Lock()
 	defer p.statsMu.Unlock()
@@ -170,6 +172,8 @@ func (p *PlugMongoDB) ensureLifecycleContext() {
 	p.lifecycleCtx, p.lifecycleStop = context.WithCancel(context.Background())
 }
 
+// resetLifecycleContext cancels and clears the lifecycle context, signalling all
+// goroutines that derive from it to terminate. Safe for concurrent calls via statsMu.
 func (p *PlugMongoDB) resetLifecycleContext() {
 	p.statsMu.Lock()
 	defer p.statsMu.Unlock()
@@ -180,6 +184,8 @@ func (p *PlugMongoDB) resetLifecycleContext() {
 	p.lifecycleStop = nil
 }
 
+// ensureStatsQuit initialises the statsQuit channel if it has not been created yet
+// (or was already closed during a previous stop). Protected by statsMu.
 func (p *PlugMongoDB) ensureStatsQuit() {
 	p.statsMu.Lock()
 	defer p.statsMu.Unlock()

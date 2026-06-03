@@ -30,6 +30,12 @@ type PrometheusMetrics struct {
 	healthCheckTotal   *prometheus.CounterVec
 	healthCheckSuccess *prometheus.CounterVec
 	healthCheckFailure *prometheus.CounterVec
+
+	// Database storage metrics (from dbStats command)
+	dbDataSizeBytes    *prometheus.GaugeVec
+	dbStorageSizeBytes *prometheus.GaugeVec
+	dbObjects          *prometheus.GaugeVec
+	dbIndexes          *prometheus.GaugeVec
 }
 
 // PrometheusConfig configuration for Prometheus metrics
@@ -152,6 +158,42 @@ func NewPrometheusMetrics(config *PrometheusConfig) *PrometheusMetrics {
 			},
 			labelNames,
 		),
+		dbDataSizeBytes: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: config.Namespace,
+				Subsystem: config.Subsystem,
+				Name:      "db_data_size_bytes",
+				Help:      "Total uncompressed size of all documents in the database (bytes), from dbStats",
+			},
+			labelNames,
+		),
+		dbStorageSizeBytes: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: config.Namespace,
+				Subsystem: config.Subsystem,
+				Name:      "db_storage_size_bytes",
+				Help:      "Total storage allocated for documents on disk (bytes), from dbStats",
+			},
+			labelNames,
+		),
+		dbObjects: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: config.Namespace,
+				Subsystem: config.Subsystem,
+				Name:      "db_objects_total",
+				Help:      "Number of documents across all collections in the database, from dbStats",
+			},
+			labelNames,
+		),
+		dbIndexes: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Namespace: config.Namespace,
+				Subsystem: config.Subsystem,
+				Name:      "db_indexes_total",
+				Help:      "Number of indexes across all collections in the database, from dbStats",
+			},
+			labelNames,
+		),
 	}
 
 	registry.MustRegister(
@@ -165,6 +207,10 @@ func NewPrometheusMetrics(config *PrometheusConfig) *PrometheusMetrics {
 		m.healthCheckTotal,
 		m.healthCheckSuccess,
 		m.healthCheckFailure,
+		m.dbDataSizeBytes,
+		m.dbStorageSizeBytes,
+		m.dbObjects,
+		m.dbIndexes,
 	)
 
 	return m
@@ -267,6 +313,44 @@ func (m *PrometheusMetrics) GetGatherer() prometheus.Gatherer {
 	return m.registry
 }
 
+// UpdateDBStats updates storage gauges from a parsed dbStats result.
+// Fields read: dataSize, storageSize, objects, indexes.
+func (m *PrometheusMetrics) UpdateDBStats(cfg *conf.MongoDB, stats bson.M) {
+	if m == nil || cfg == nil || stats == nil {
+		return
+	}
+	labels := m.buildLabels(cfg)
+
+	if v, ok := toFloat64(stats["dataSize"]); ok {
+		m.dbDataSizeBytes.With(labels).Set(v)
+	}
+	if v, ok := toFloat64(stats["storageSize"]); ok {
+		m.dbStorageSizeBytes.With(labels).Set(v)
+	}
+	if v, ok := toFloat64(stats["objects"]); ok {
+		m.dbObjects.With(labels).Set(v)
+	}
+	if v, ok := toFloat64(stats["indexes"]); ok {
+		m.dbIndexes.With(labels).Set(v)
+	}
+}
+
+// toFloat64 converts a bson.M value (int32, int64, float64) to float64.
+func toFloat64(v any) (float64, bool) {
+	switch n := v.(type) {
+	case int32:
+		return float64(n), true
+	case int64:
+		return float64(n), true
+	case float64:
+		return n, true
+	case int:
+		return float64(n), true
+	default:
+		return 0, false
+	}
+}
+
 func (m *PrometheusMetrics) buildLabels(cfg *conf.MongoDB) prometheus.Labels {
 	db := "test"
 	if cfg != nil && cfg.Database != "" {
@@ -313,8 +397,8 @@ func extractDocumentsFromReply(reply bson.Raw, cmdName string) int64 {
 		NRemoved  int64 `bson:"nRemoved"`
 		NDropped  int64 `bson:"nDropped"`
 		Cursor    *struct {
-			FirstBatch []interface{} `bson:"firstBatch"`
-			NextBatch  []interface{} `bson:"nextBatch"`
+			FirstBatch []any `bson:"firstBatch"`
+			NextBatch  []any `bson:"nextBatch"`
 		} `bson:"cursor"`
 	}
 	if err := bson.Unmarshal(reply, &doc); err != nil {

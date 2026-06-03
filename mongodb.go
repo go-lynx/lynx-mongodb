@@ -2,6 +2,7 @@ package mongodb
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
 	"time"
 
@@ -125,6 +126,8 @@ func (p *PlugMongoDB) parseConfig(cfg config.Config) error {
 	return nil
 }
 
+// createClientContext builds and connects a mongo.Client using the current configuration.
+// It respects parentCtx's deadline when establishing the initial connection.
 func (p *PlugMongoDB) createClientContext(parentCtx context.Context) error {
 	// Parse timeout values
 	connectTimeout := p.conf.ConnectTimeout.AsDuration()
@@ -152,6 +155,9 @@ func (p *PlugMongoDB) createClientContext(parentCtx context.Context) error {
 	// Set timeout configuration
 	clientOptions.SetConnectTimeout(connectTimeout)
 	clientOptions.SetServerSelectionTimeout(serverSelectionTimeout)
+	// SetSocketTimeout is deprecated in mongo-driver v1.7+ in favour of the
+	// CSOT SetTimeout option. We retain it here for per-socket idle/read/write
+	// deadline semantics; migrate to SetTimeout when upgrading to v2.
 	clientOptions.SetSocketTimeout(socketTimeout)
 	clientOptions.SetHeartbeatInterval(heartbeatInterval)
 
@@ -164,7 +170,12 @@ func (p *PlugMongoDB) createClientContext(parentCtx context.Context) error {
 		})
 	}
 
-	// Set TLS configuration
+	// Set TLS configuration.
+	// When EnableTls is true and no cert/key/CA files are specified, a zero-value
+	// tls.Config is used so the driver negotiates TLS with the system CA pool.
+	// Providing tls_ca_file enables custom CA verification (mutual-TLS server auth).
+	// Providing both tls_cert_file and tls_key_file additionally authenticates the
+	// client (full mTLS).
 	if p.conf.EnableTls {
 		tlsOpts := make(map[string]any)
 		if p.conf.TlsCertFile != "" {
@@ -182,6 +193,9 @@ func (p *PlugMongoDB) createClientContext(parentCtx context.Context) error {
 				return fmt.Errorf("failed to build TLS config: %w", err)
 			}
 			clientOptions.SetTLSConfig(tlsConfig)
+		} else {
+			// Bare TLS: use system CA pool, no client certificate.
+			clientOptions.SetTLSConfig(&tls.Config{})
 		}
 	}
 
@@ -238,6 +252,8 @@ func (p *PlugMongoDB) createClientContext(parentCtx context.Context) error {
 	return nil
 }
 
+// testConnectionContext sends a ping to verify the MongoDB connection is alive.
+// A 10-second timeout is applied unless parentCtx already has a shorter deadline.
 func (p *PlugMongoDB) testConnectionContext(parentCtx context.Context) error {
 	ctx, cancel := p.createTimeoutContext(parentCtx, 10*time.Second)
 	defer cancel()
@@ -250,7 +266,9 @@ func (p *PlugMongoDB) testConnectionContext(parentCtx context.Context) error {
 	return nil
 }
 
-// startMetricsCollection starts metrics collection
+// startMetricsCollection spawns a background goroutine that periodically calls
+// collectMetricsContext at the configured health-check interval (default 30 s).
+// The goroutine is stopped via metricsCancel or the statsQuit channel.
 func (p *PlugMongoDB) startMetricsCollection() {
 	// Use health check interval for metrics collection or default to 30 seconds
 	var interval time.Duration
@@ -288,6 +306,8 @@ func (p *PlugMongoDB) startMetricsCollection() {
 	})
 }
 
+// collectMetricsContext gathers config-based and dbStats-based Prometheus metrics.
+// It runs periodically from the metrics goroutine spawned by startMetricsCollection.
 func (p *PlugMongoDB) collectMetricsContext(parentCtx context.Context) {
 	ctx, cancel := p.createTimeoutContext(parentCtx, 5*time.Second)
 	defer cancel()
@@ -297,21 +317,25 @@ func (p *PlugMongoDB) collectMetricsContext(parentCtx context.Context) {
 		p.prometheusMetrics.UpdateConfigMetrics(p.conf)
 	}
 
-	// Get database statistics (validates connection, supports future extended metrics)
-	var dbStatsResult bson.M
+	// Get database statistics: validates the connection and exposes storage metrics.
 	if p.database == nil {
 		return
 	}
+	var dbStatsResult bson.M
 	if err := p.database.RunCommand(ctx, bson.D{{Key: "dbStats", Value: 1}}).Decode(&dbStatsResult); err != nil {
 		log.Errorf("failed to get database stats: %v", err)
 		return
 	}
-	_ = dbStatsResult // reserved for future storage-size etc. metrics
+	if p.prometheusMetrics != nil {
+		p.prometheusMetrics.UpdateDBStats(p.conf, dbStatsResult)
+	}
 
 	log.Debug("mongodb metrics collected")
 }
 
-// startHealthCheck starts health check
+// startHealthCheck spawns a background goroutine that periodically pings MongoDB
+// at the configured health-check interval. Results are recorded as Prometheus metrics.
+// The goroutine is stopped via healthCancel or the statsQuit channel.
 func (p *PlugMongoDB) startHealthCheck() {
 	interval := p.conf.HealthCheckInterval.AsDuration()
 
@@ -343,7 +367,8 @@ func (p *PlugMongoDB) startHealthCheck() {
 	})
 }
 
-// closeStatsQuitOnce closes statsQuit only once in a thread-safe way
+// closeStatsQuitOnce closes the statsQuit channel exactly once in a thread-safe way.
+// Subsequent calls after the first close are no-ops.
 func (p *PlugMongoDB) closeStatsQuitOnce() {
 	p.statsMu.Lock()
 	defer p.statsMu.Unlock()
@@ -353,6 +378,7 @@ func (p *PlugMongoDB) closeStatsQuitOnce() {
 	}
 }
 
+// checkHealthContext pings MongoDB and records the result as a Prometheus health-check metric.
 func (p *PlugMongoDB) checkHealthContext(parentCtx context.Context) error {
 	ctx, cancel := p.createTimeoutContext(parentCtx, 5*time.Second)
 	defer cancel()
@@ -374,6 +400,8 @@ func (p *PlugMongoDB) CheckHealth() error {
 	return p.checkHealthContext(context.Background())
 }
 
+// stopBackgroundTasksContext cancels the metrics and health-check goroutines and waits for
+// them to finish, respecting a 10-second upper bound derived from parentCtx.
 func (p *PlugMongoDB) stopBackgroundTasksContext(parentCtx context.Context) error {
 	if p.metricsCancel != nil {
 		p.metricsCancel()
