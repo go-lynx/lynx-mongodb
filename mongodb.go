@@ -19,27 +19,27 @@ import (
 	"google.golang.org/protobuf/types/known/durationpb"
 )
 
-// Initialize initializes the MongoDB plugin
+// Initialize delegates to initializeWithContext with a background context.
 func (p *PlugMongoDB) Initialize(plugin plugins.Plugin, rt plugins.Runtime) error {
 	return p.initializeWithContext(context.Background(), plugin, rt)
 }
 
-// Start starts the MongoDB plugin
+// Start connects the MongoDB client and registers runtime resources.
 func (p *PlugMongoDB) Start(plugin plugins.Plugin) error {
 	return p.startWithContext(context.Background(), plugin, "Start")
 }
 
-// Stop stops the MongoDB plugin
+// Stop disconnects the MongoDB client and stops background health checks.
 func (p *PlugMongoDB) Stop(plugin plugins.Plugin) error {
 	return p.stopWithContext(context.Background(), plugin, "Stop")
 }
 
-// CleanupTasks implements the plugin cleanup interface
+// CleanupTasks stops background tasks and disconnects the MongoDB client.
 func (p *PlugMongoDB) CleanupTasks() error {
 	return p.CleanupTasksContext(context.Background())
 }
 
-// CleanupTasksContext implements context-aware cleanup with proper timeout handling
+// CleanupTasksContext is the context-aware implementation of CleanupTasks.
 func (p *PlugMongoDB) CleanupTasksContext(parentCtx context.Context) error {
 	log.Info("cleaning up mongodb plugin")
 
@@ -76,16 +76,14 @@ func (p *PlugMongoDB) createTimeoutContext(parentCtx context.Context, timeout ti
 	return context.WithTimeout(parentCtx, timeout)
 }
 
-// parseConfig parses configuration
+// parseConfig scans the runtime config into p.conf and fills in production-safe defaults.
 func (p *PlugMongoDB) parseConfig(cfg config.Config) error {
-	// Read mongodb configuration from config
 	var mongodbConf conf.MongoDB
 	if err := cfg.Scan(&mongodbConf); err != nil {
 		return err
 	}
 	p.conf = &mongodbConf
 
-	// Set default values
 	if p.conf.Uri == "" {
 		p.conf.Uri = "mongodb://localhost:27017"
 	}
@@ -135,10 +133,8 @@ func (p *PlugMongoDB) createClientContext(parentCtx context.Context) error {
 	socketTimeout := p.conf.SocketTimeout.AsDuration()
 	heartbeatInterval := p.conf.HeartbeatInterval.AsDuration()
 
-	// Build client options
 	clientOptions := options.Client().ApplyURI(p.conf.Uri)
 
-	// Set CommandMonitor and PoolMonitor for Prometheus metrics
 	if p.prometheusMetrics != nil {
 		if cmdMon := p.prometheusMetrics.CreateCommandMonitor(p.conf); cmdMon != nil {
 			clientOptions.SetMonitor(cmdMon)
@@ -148,11 +144,8 @@ func (p *PlugMongoDB) createClientContext(parentCtx context.Context) error {
 		}
 	}
 
-	// Set connection pool configuration
 	clientOptions.SetMaxPoolSize(p.conf.MaxPoolSize)
 	clientOptions.SetMinPoolSize(p.conf.MinPoolSize)
-
-	// Set timeout configuration
 	clientOptions.SetConnectTimeout(connectTimeout)
 	clientOptions.SetServerSelectionTimeout(serverSelectionTimeout)
 	// SetSocketTimeout is deprecated in mongo-driver v1.7+ in favour of the
@@ -161,7 +154,6 @@ func (p *PlugMongoDB) createClientContext(parentCtx context.Context) error {
 	clientOptions.SetSocketTimeout(socketTimeout)
 	clientOptions.SetHeartbeatInterval(heartbeatInterval)
 
-	// Set authentication information
 	if p.conf.Username != "" && p.conf.Password != "" {
 		clientOptions.SetAuth(options.Credential{
 			Username:   p.conf.Username,
@@ -199,17 +191,14 @@ func (p *PlugMongoDB) createClientContext(parentCtx context.Context) error {
 		}
 	}
 
-	// Set compression configuration
 	if p.conf.EnableCompression {
 		clientOptions.SetCompressors([]string{"zlib", "snappy"})
 	}
 
-	// Set retry writes
 	if p.conf.EnableRetryWrites {
 		clientOptions.SetRetryWrites(true)
 	}
 
-	// Set read concern
 	if p.conf.EnableReadConcern {
 		var rc *readconcern.ReadConcern
 		switch p.conf.ReadConcernLevel {

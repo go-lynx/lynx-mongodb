@@ -14,26 +14,14 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 )
 
-// init function is a special function in Go that is automatically executed when the package is loaded.
-// This function registers the MongoDB client plugin to the global plugin factory.
-// The first parameter pluginName is the unique name of the plugin, used to identify the plugin.
-// The second parameter confPrefix is the configuration prefix, used to read plugin-related configuration from the config.
-// The third parameter is an anonymous function that returns an instance of plugins.Plugin interface type,
-// by calling the NewMongoDBClient function to create a new MongoDB client plugin instance.
+// init registers the MongoDB plugin with the global factory on import.
 func init() {
-	// Register the MongoDB client plugin to the global plugin factory.
-	// The first parameter pluginName is the unique plugin name used for identification.
-	// The second parameter confPrefix is the configuration prefix, used to read plugin-related configuration from the config.
-	// The third parameter is an anonymous function that returns an instance of plugins.Plugin interface type,
-	// by calling the NewMongoDBClient function to create a new MongoDB client plugin instance.
 	factory.GlobalTypedFactory().RegisterPlugin(pluginName, confPrefix, func() plugins.Plugin {
 		return NewMongoDBClient()
 	})
 }
 
-// GetMongoDB function is used to get the MongoDB client instance.
-// It gets the plugin manager through the global Lynx application instance, then gets the corresponding plugin instance by plugin name,
-// finally converts the plugin instance to *PlugMongoDB type and returns its client field, which is the MongoDB client.
+// GetMongoDB returns the underlying mongo.Client, or nil if the plugin is not loaded.
 func GetMongoDB() *mongo.Client {
 	client, err := GetProvider().Client(context.Background())
 	if err != nil {
@@ -42,7 +30,7 @@ func GetMongoDB() *mongo.Client {
 	return client
 }
 
-// GetMongoDBPlugin gets the MongoDB plugin instance
+// GetMongoDBPlugin returns the MongoDB plugin instance from the global manager, or nil.
 func GetMongoDBPlugin() *PlugMongoDB {
 	app := lynx.Lynx()
 	if app == nil {
@@ -63,7 +51,7 @@ func GetMongoDBPlugin() *PlugMongoDB {
 	return client
 }
 
-// GetMongoDBDatabase gets the MongoDB database instance
+// GetMongoDBDatabase returns the configured database, or nil if the plugin is not loaded.
 func GetMongoDBDatabase() *mongo.Database {
 	database, err := GetProvider().Database(context.Background())
 	if err != nil {
@@ -72,7 +60,7 @@ func GetMongoDBDatabase() *mongo.Database {
 	return database
 }
 
-// GetMongoDBCollection gets the MongoDB collection instance
+// GetMongoDBCollection returns a handle to the named collection, or nil if the plugin is not loaded.
 func GetMongoDBCollection(collectionName string) *mongo.Collection {
 	collection, err := GetProvider().Collection(context.Background(), collectionName)
 	if err != nil {
